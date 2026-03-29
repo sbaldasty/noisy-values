@@ -52,43 +52,42 @@ class NoisyValue:
 
         return cls(expr, observed, thetas={theta})
 
-    def _combine(self, other, op):
-        if isinstance(other, NoisyValue):
-            expr = op(self.expr, other.expr)
-            observed = op(self.observed, other.observed)
-            thetas = self.thetas | other.thetas
-            equations = self.equations + other.equations
+    @staticmethod
+    def _combine(a, b, op):
+        if isinstance(b, NoisyValue):
+            expr = op(a.expr, b.expr)
+            observed = op(a.observed, b.observed)
+            thetas = a.thetas | b.thetas
+            equations = a.equations + b.equations
             return NoisyValue(expr, observed, thetas, equations)
         else:
-            expr = op(self.expr, other)
-            observed = op(self.observed, other)
-            return NoisyValue(expr, observed, self.thetas, self.equations)
+            expr = op(a.expr, b)
+            observed = op(a.observed, b)
+            return NoisyValue(expr, observed, a.thetas, a.equations)
 
     def __add__(self, other):
-        return self._combine(other, lambda a, b: a + b)
+        return NoisyValue._combine(self, other, lambda a, b: a + b)
 
-    __radd__ = __add__
+    def __radd__(self, other):
+        return NoisyValue._combine(self, other, lambda a, b: b + a)
 
     def __sub__(self, other):
-        return self._combine(other, lambda a, b: a - b)
+        return NoisyValue._combine(self, other, lambda a, b: a - b)
 
     def __rsub__(self, other):
-        return NoisyValue(other - self.expr,
-                          other - self.observed,
-                          self.thetas)
+        return NoisyValue._combine(self, other, lambda a, b: b - a)
 
     def __mul__(self, other):
-        return self._combine(other, lambda a, b: a * b)
+        return NoisyValue._combine(self, other, lambda a, b: a * b)
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        return NoisyValue._combine(self, other, lambda a, b: b * a)
 
     def __truediv__(self, other):
-        return self._combine(other, lambda a, b: a / b)
+        return NoisyValue._combine(self, other, lambda a, b: a / b)
 
     def __rtruediv__(self, other):
-        return NoisyValue(other / self.expr,
-                          other / self.observed,
-                          self.thetas)
+        return NoisyValue._combine(self, other, lambda a, b: b / a)
 
     def eliminate_thetas(self):
         expr = self.expr
