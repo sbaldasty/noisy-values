@@ -1,10 +1,10 @@
 from sympy import Expr
 from sympy.stats import Normal
+from sympy.stats import sample
 
 
 import sympy as sp
 import numpy as np
-from sympy.stats import Normal, sample
 from sympy.stats.rv import random_symbols
 
 # ---- global registries ----
@@ -91,8 +91,7 @@ class NoisyValue:
                           self.thetas)
 
     def eliminate_thetas(self):
-        if not self.thetas:
-            return self.expr
+        expr = self.expr
 
         eqs = [sp.Eq(eq, 0) for eq in self.equations]
         thetas = list(self.thetas)
@@ -102,10 +101,25 @@ class NoisyValue:
         if not sol:
             raise ValueError("Could not solve for latent variables")
 
-        # take first solution (usually unique in your setting)
         sol = sol[0]
 
-        return self.expr.subs(sol)
+        new_subs = {}
+
+        for theta, rhs in sol.items():
+            # replace any noise variables in rhs with fresh copies
+            noise_vars = random_symbols(rhs)
+            replacements = {}
+
+            for v in noise_vars:
+                replacements[v] = fresh_normal(
+                    float(v.pspace.distribution.mean),
+                    float(v.pspace.distribution.std)
+                )
+
+            new_rhs = rhs.subs(replacements)
+            new_subs[theta] = new_rhs
+
+        return expr.subs(new_subs)
 
     def sample_n(self, n=1000):
         expr = self.eliminate_thetas()
@@ -114,7 +128,6 @@ class NoisyValue:
 
         samples = []
         for _ in range(n):
-            print([float(sample(v)) for v in vars_])
             subs = {v: float(sample(v)) for v in vars_}
             samples.append(float(expr.subs(subs)))
 
