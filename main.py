@@ -16,12 +16,6 @@ def fresh_theta(tag=None):
     _theta_counter += 1
     return sp.Symbol(name)
 
-def fresh_normal(mu=0, sigma=1):
-    global _noise_counter
-    name = f"N{_noise_counter}"
-    _noise_counter += 1
-    return Normal(name, mu, sigma)
-
 
 def fresh_noise_name(prefix="R"):
     global _noise_counter
@@ -83,14 +77,6 @@ class NoisyValue:
         noise_rv = dist_builder(name, *dist_args, **dist_kwargs)
         return cls.from_noise_rv(true_value, noise_rv, provenance=provenance)
     
-    @classmethod
-    def gaussian(cls, true_value, sigma, provenance=None):
-        """
-        provenance: optional tag to reuse the same θ across calls
-        """
-        noise = fresh_normal(0, sigma)
-        return cls.from_noise_rv(true_value, noise, provenance=provenance)
-
     @staticmethod
     def _combine(a, b, op):
         if isinstance(b, NoisyValue):
@@ -215,7 +201,7 @@ class NoisyValue:
         return np.asarray(samples, dtype=float)
 
 if __name__ == "__main__":
-    x = NoisyValue.gaussian(10, 1, provenance="A")
+    x = NoisyValue.from_distribution(10, sp.stats.Normal, 0, 1, provenance="A")
     y = NoisyValue.from_distribution(5, sp.stats.Exponential, 2, provenance="B")
 
     z = x * y
