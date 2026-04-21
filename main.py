@@ -1,20 +1,19 @@
-from sympy.stats import Normal
-from sympy.stats import sample
-
-
 import sympy as sp
 import numpy as np
+
+from sympy import Symbol
+from sympy.stats import sample
 from sympy.stats.rv import random_symbols
 
-# ---- global registries ----
 _theta_counter = 0
 _noise_counter = 0
+
 
 def fresh_theta(tag=None):
     global _theta_counter
     name = f"theta_{_theta_counter}" if tag is None else f"theta_{tag}_{_theta_counter}"
     _theta_counter += 1
-    return sp.Symbol(name)
+    return Symbol(name)
 
 
 def fresh_noise_name(prefix="R"):
@@ -148,9 +147,11 @@ class NoisyValue:
         return expr.subs(substitutions)
 
     def sample_n(self, n=1000, noise_cloner=None, library="scipy", seed=None, **sample_kwargs):
+        # If they don't want any samples, don't return any
         if n <= 0:
             return np.array([], dtype=float)
 
+        # Random number generator to use for sampling
         sample_seed = seed
         if isinstance(seed, int):
             sample_seed = np.random.default_rng(seed)
