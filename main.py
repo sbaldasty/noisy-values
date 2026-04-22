@@ -47,17 +47,6 @@ class NoisyValue:
         mechanism is encoded in `equations` as `theta + noise - observed = 0`.
         This makes downstream sampling reflect analyst belief about the true
         quantity rather than release-to-release spread.
-
-        Parameters
-        ----------
-        true_value : float-like
-            Latent true value associated with the observation.
-        noise_rv : RandomSymbol
-            SymPy random variable added to theta.
-        provenance : str | None
-            Optional tag included in theta naming.
-        sample_kwargs : dict
-            Forwarded to sympy.stats.sample when generating the observation.
         """
         noise_symbols = random_symbols(noise_rv)
         if len(noise_symbols) != 1 or noise_rv not in noise_symbols:
@@ -72,7 +61,15 @@ class NoisyValue:
         return cls(theta, observed, thetas={theta}, equations=equations)
 
     @classmethod
-    def from_distribution(cls, true_value, dist_builder, *dist_args, provenance=None, name_prefix="R", **dist_kwargs):
+    def from_distribution(
+        cls,
+        true_value,
+        dist_builder,
+        *dist_args,
+        provenance=None,
+        name_prefix="R",
+        **dist_kwargs,
+    ):
         """
         Build a NoisyValue from a SymPy distribution constructor.
 
@@ -81,7 +78,7 @@ class NoisyValue:
         name = fresh_noise_name(name_prefix)
         noise_rv = dist_builder(name, *dist_args, **dist_kwargs)
         return cls.from_noise_rv(true_value, noise_rv, provenance=provenance)
-    
+
     @staticmethod
     def _combine(a, b, op):
         if isinstance(b, NoisyValue):
@@ -90,10 +87,10 @@ class NoisyValue:
             thetas = a.thetas | b.thetas
             equations = a.equations + b.equations
             return NoisyValue(expr, observed, thetas, equations)
-        else:
-            expr = op(a.expr, b)
-            observed = op(a.observed, b)
-            return NoisyValue(expr, observed, a.thetas, a.equations)
+
+        expr = op(a.expr, b)
+        observed = op(a.observed, b)
+        return NoisyValue(expr, observed, a.thetas, a.equations)
 
     def __add__(self, other):
         return NoisyValue._combine(self, other, lambda a, b: a + b)
@@ -127,7 +124,12 @@ class NoisyValue:
         if not sol:
             raise ValueError("Could not solve for latent variables")
 
-        return sol[0]
+        chosen = sol[0]
+        missing = self.thetas - set(chosen.keys())
+        if missing:
+            raise ValueError(f"Latent variables are underidentified: {missing}")
+
+        return chosen
 
     def eliminate_thetas(self, noise_cloner=None):
         expr = self.expr
@@ -153,11 +155,9 @@ class NoisyValue:
         return expr.subs(substitutions)
 
     def sample_n(self, n=1000, noise_cloner=None, library="scipy", seed=None, **sample_kwargs):
-        # If they don't want any samples, don't return any
         if n <= 0:
             return np.array([], dtype=float)
 
-        # Random number generator to use for sampling
         sample_seed = seed
         if isinstance(seed, int):
             sample_seed = np.random.default_rng(seed)
@@ -208,101 +208,141 @@ class NoisyValue:
         return np.asarray(samples, dtype=float)
 
 
+def _evaluate_random_expr(expr, rng, library="scipy", **sample_kwargs):
+    """Substitute one fresh numeric draw for each random symbol in expr."""
+    value = expr
+    for rv in random_symbols(value):
+        value = value.subs(rv, float(sample(rv, library=library, seed=rng, **sample_kwargs)))
+    return float(value)
+
+
 def plot_confidence_heatmap(
     noisy_value,
     theta_range=None,
     observed_range=None,
     grid_size=201,
-    n_samples=4000,
+    n_samples=6000,
     cmap="viridis_r",
     ax=None,
     seed=None,
     library="scipy",
+    bandwidth=None,
     **sample_kwargs,
 ):
     """
-    Plot a heat map of central-interval thresholds for a single latent value.
+    Plot a confidence-threshold heat map for the composed quantity in `noisy_value`.
 
     Axes
     -----
-    x-axis: candidate true value (theta)
-    y-axis: candidate observed value (y)
+    x-axis: true value of `noisy_value.expr`
+    y-axis: observed value of the same composed quantity
 
     Heat value
     ----------
-    For each (theta, y), the color encodes the smallest central interval
-    probability level whose interval around theta contains y.
+    For each (x, y), color is the smallest central-interval probability level
+    that contains y in the conditional observed distribution for that x-column.
 
-    Lower threshold values correspond to narrower intervals. The default colormap
-    (`viridis_r`) makes these narrower intervals brighter.
+    This function supports multiple latent thetas and multiple equations by
+    Monte Carlo: draw latent theta vectors from all equations, then simulate a
+    fresh observed realization of the composed expression.
     """
-    if len(noisy_value.thetas) != 1:
-        raise ValueError("Heatmap requires exactly one latent theta in NoisyValue")
-    if len(noisy_value.equations) != 1:
-        raise ValueError("Heatmap currently supports exactly one observation equation")
     if grid_size < 2:
         raise ValueError("grid_size must be at least 2")
     if n_samples <= 0:
         raise ValueError("n_samples must be > 0")
+    if not noisy_value.thetas:
+        raise ValueError("Heatmap requires at least one latent theta in NoisyValue")
 
-    theta = next(iter(noisy_value.thetas))
-    measurement_expr = noisy_value.equations[0] + noisy_value.observed
+    sol = noisy_value._solve_theta_substitutions()
+    rhs_noise_vars = list({rv for rhs in sol.values() for rv in random_symbols(rhs)})
+
+    # Infer one measurement-noise RV per theta from equations that reference it.
+    theta_noise_rv = {}
+    for theta in noisy_value.thetas:
+        eqs_for_theta = [eq for eq in noisy_value.equations if theta in eq.free_symbols]
+        if not eqs_for_theta:
+            raise ValueError(f"No observation equation references latent {theta}")
+
+        chosen_rv = None
+        for eq in eqs_for_theta:
+            rvs = list(random_symbols(eq))
+            if rvs:
+                chosen_rv = rvs[0]
+                break
+        if chosen_rv is None:
+            raise ValueError(f"Could not infer measurement noise RV for latent {theta}")
+        theta_noise_rv[theta] = chosen_rv
 
     rng = seed
     if isinstance(seed, int):
         rng = np.random.default_rng(seed)
 
-    if theta_range is None or observed_range is None:
-        pilot_expr = measurement_expr.subs({theta: noisy_value.observed})
-        try:
-            pilot = np.asarray(
-                sample(pilot_expr, size=2000, library=library, seed=rng, **sample_kwargs),
-                dtype=float,
-            )
-        except Exception:
-            pilot = np.asarray(
-                [
-                    float(sample(pilot_expr, library=library, seed=rng, **sample_kwargs))
-                    for _ in range(2000)
-                ],
-                dtype=float,
-            )
+    x_true_samples = np.empty(n_samples, dtype=float)
+    y_obs_samples = np.empty(n_samples, dtype=float)
 
-        spread = float(np.std(pilot, ddof=1))
-        if not np.isfinite(spread) or spread == 0.0:
-            spread = 1.0
+    for i in range(n_samples):
+        rhs_noise_draws = {
+            rv: float(sample(rv, library=library, seed=rng, **sample_kwargs))
+            for rv in rhs_noise_vars
+        }
+        theta_values = {
+            theta: float(rhs.subs(rhs_noise_draws))
+            for theta, rhs in sol.items()
+        }
 
-        if theta_range is None:
-            theta_range = (noisy_value.observed - 4 * spread, noisy_value.observed + 4 * spread)
-        if observed_range is None:
-            observed_range = (noisy_value.observed - 4 * spread, noisy_value.observed + 4 * spread)
+        x_true_samples[i] = _evaluate_random_expr(
+            noisy_value.expr.subs(theta_values),
+            rng,
+            library=library,
+            **sample_kwargs,
+        )
+
+        observed_theta_values = {
+            theta: theta_values[theta] + float(sample(theta_noise_rv[theta], library=library, seed=rng, **sample_kwargs))
+            for theta in noisy_value.thetas
+        }
+        y_obs_samples[i] = _evaluate_random_expr(
+            noisy_value.expr.subs(observed_theta_values),
+            rng,
+            library=library,
+            **sample_kwargs,
+        )
+
+    if theta_range is None:
+        lo, hi = np.quantile(x_true_samples, [0.005, 0.995])
+        pad = 0.05 * (hi - lo if hi > lo else 1.0)
+        theta_range = (float(lo - pad), float(hi + pad))
+
+    if observed_range is None:
+        lo, hi = np.quantile(y_obs_samples, [0.005, 0.995])
+        pad = 0.05 * (hi - lo if hi > lo else 1.0)
+        observed_range = (float(lo - pad), float(hi + pad))
 
     theta_grid = np.linspace(theta_range[0], theta_range[1], grid_size)
     observed_grid = np.linspace(observed_range[0], observed_range[1], grid_size)
 
+    if bandwidth is None:
+        x_std = float(np.std(x_true_samples, ddof=1))
+        if not np.isfinite(x_std) or x_std == 0.0:
+            x_std = max(1e-6, (theta_range[1] - theta_range[0]) / 20.0)
+        bandwidth = 0.2 * x_std
+    bandwidth = float(max(bandwidth, 1e-12))
+
     heat = np.empty((grid_size, grid_size), dtype=float)
-    for j, theta_value in enumerate(theta_grid):
-        expr_at_theta = measurement_expr.subs({theta: theta_value})
+    for j, x0 in enumerate(theta_grid):
+        z = (x_true_samples - x0) / bandwidth
+        w = np.exp(-0.5 * z * z)
+        w_sum = float(np.sum(w))
+        if w_sum <= 0.0 or not np.isfinite(w_sum):
+            w = np.full_like(w, 1.0 / len(w))
+        else:
+            w /= w_sum
 
-        try:
-            y_draws = np.asarray(
-                sample(expr_at_theta, size=n_samples, library=library, seed=rng, **sample_kwargs),
-                dtype=float,
-            )
-        except Exception:
-            y_draws = np.asarray(
-                [
-                    float(sample(expr_at_theta, library=library, seed=rng, **sample_kwargs))
-                    for _ in range(n_samples)
-                ],
-                dtype=float,
-            )
+        center = float(np.sum(w * y_obs_samples))
+        distances = np.abs(y_obs_samples - center)
+        query_radius = np.abs(observed_grid - center)
 
-        dist_from_center = np.abs(y_draws - theta_value)[:, None]
-        query_radius = np.abs(observed_grid - theta_value)[None, :]
-
-        # Minimal central-interval level that contains each y on this column.
-        heat[:, j] = np.mean(dist_from_center <= query_radius, axis=0)
+        heat[:, j] = np.array([float(np.sum(w[distances <= r])) for r in query_radius], dtype=float)
 
     created_fig = False
     if ax is None:
@@ -319,10 +359,10 @@ def plot_confidence_heatmap(
         vmax=1.0,
     )
 
-    ax.set_xlabel("True value (theta)")
+    ax.set_xlabel("True value")
     ax.set_ylabel("Observed value")
     ax.set_title("Confidence-Interval Threshold Heatmap")
-    ax.plot(theta_grid, theta_grid, color="white", linestyle="--", linewidth=1.2, alpha=0.8)
+    ax.plot(theta_grid, theta_grid, color="white", linestyle="--", linewidth=1.0, alpha=0.5)
 
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("Smallest central CI probability containing observed value")
@@ -335,66 +375,7 @@ def plot_confidence_heatmap(
         "heat": heat,
         "theta_grid": theta_grid,
         "observed_grid": observed_grid,
+        "x_true_samples": x_true_samples,
+        "y_obs_samples": y_obs_samples,
+        "bandwidth": bandwidth,
     }
-
-if __name__ == "__main__":
-    # x = NoisyValue.from_distribution(10, sp.stats.Normal, 0, 1, provenance="A")
-    # y = NoisyValue.from_distribution(5, sp.stats.Exponential, 2, provenance="B")
-
-    # z = x * y
-
-    # print(z.expr)
-    # samples = z.sample_n(1000, seed=123)
-    # print(f"Mean: {samples.mean()}, Std: {samples.std()}")
-
-
-    # Without cloning
-    import sympy as sp
-    import numpy as np
-
-    # One RV object reused for both measurement noise and predictive noise
-    eps = sp.stats.Normal("E", 0, 1)
-    theta = fresh_theta("demo")
-    observed = 10.0
-
-    # expr uses theta + eps (predictive noise)
-    # equation uses theta + eps - observed = 0 (measurement noise)
-    # These are conceptually different noises, but represented by same RV object.
-    nv = NoisyValue(
-        expr=theta + eps,
-        observed=observed,
-        thetas={theta},
-        equations=[theta + eps - observed],
-    )
-
-    bad_expr = nv.eliminate_thetas()   # becomes 10.0 due to E - E cancellation
-    bad_samples = nv.sample_n(5000, seed=0)
-
-    print("bad_expr:", bad_expr)
-    print("bad std:", np.std(bad_samples))
-
-    # With cloning
-    import sympy as sp
-    import numpy as np
-
-    def clone_normal(rv):
-        # Demo cloner for Normal RVs: same parameters, fresh name
-        d = rv.pspace.distribution
-        return sp.stats.Normal(f"{rv.symbol.name}_clone", d.mean, d.std)
-
-    eps = sp.stats.Normal("E", 0, 1)
-    theta = fresh_theta("demo")
-    observed = 10.0
-
-    nv = NoisyValue(
-        expr=theta + eps,
-        observed=observed,
-        thetas={theta},
-        equations=[theta + eps - observed],
-    )
-
-    good_expr = nv.eliminate_thetas(noise_cloner=clone_normal)  # 10 - E_clone + E
-    good_samples = nv.sample_n(5000, noise_cloner=clone_normal, seed=0)
-
-    print("good_expr:", good_expr)
-    print("good std:", np.std(good_samples))
