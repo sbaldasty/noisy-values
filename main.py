@@ -27,7 +27,6 @@ class NoisyValue:
     def __init__(self, expr, observed, thetas=None, equations=None):
         self.expr = sp.sympify(expr)
         self.observed = float(observed)
-
         self.thetas = set() if thetas is None else set(thetas)
 
         if equations is None:
@@ -42,6 +41,11 @@ class NoisyValue:
     def from_noise_rv(cls, true_value, noise_rv, provenance=None, **sample_kwargs):
         """
         Build a NoisyValue from any SymPy random variable.
+
+        The returned `expr` is the latent value (`theta`), while the measurement
+        mechanism is encoded in `equations` as `theta + noise - observed = 0`.
+        This makes downstream sampling reflect analyst belief about the true
+        quantity rather than release-to-release spread.
 
         Parameters
         ----------
@@ -59,11 +63,12 @@ class NoisyValue:
             raise TypeError("noise_rv must be a single SymPy random variable")
 
         theta = fresh_theta(provenance)
-        expr = theta + noise_rv
-        observed_expr = expr.subs({theta: sp.sympify(true_value)})
+        measurement_expr = theta + noise_rv
+        observed_expr = measurement_expr.subs({theta: sp.sympify(true_value)})
         observed = float(sample(observed_expr, **sample_kwargs))
 
-        return cls(expr, observed, thetas={theta})
+        equations = [measurement_expr - observed]
+        return cls(theta, observed, thetas={theta}, equations=equations)
 
     @classmethod
     def from_distribution(cls, true_value, dist_builder, *dist_args, provenance=None, name_prefix="R", **dist_kwargs):
