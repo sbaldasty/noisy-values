@@ -139,6 +139,9 @@ class NoisyFloat(NoisyValue):
     def __repr__(self):
         return f"NoisyFloat(expr={self.expr}, observed={self.observed})"
 
+    def __float__(self):
+        return self.observed
+
     @classmethod
     def from_noise_rv(cls, true_value, noise_rv, provenance=None, **sample_kwargs):
         """
@@ -291,8 +294,7 @@ class NoisyBool(NoisyValue):
         return f"NoisyBool(expr={self.expr}, observed={self.observed})"
 
     def __bool__(self):
-        # TODO Should come from observed value
-        raise Exception("not implemented")
+        return self.observed >= 0.5
 
     def __and__(self, other):
         return _combine_bool(self, other, lambda a, b: sp.And(a, b), lambda a, b: a and b)
