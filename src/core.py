@@ -3,31 +3,27 @@ import numpy as np
 
 from sympy import Max
 from sympy import Min
-from sympy import Symbol
 from sympy.stats import sample
 from sympy.stats.rv import random_symbols
 
 
-_theta_counter = 0
-_noise_counter = 0
+def _as_noisy_float(value):
+    if isinstance(value, NoisyFloat):
+        return value
+    expr = sp.sympify(value)
+    return NoisyFloat(expr, float(expr), thetas=set(), equations=[])
 
 
-def _fresh_theta():
-    global _theta_counter
-    name = f"theta_{_theta_counter}"
-    _theta_counter += 1
-    return Symbol(name)
-
-
-def _fresh_noise_name(prefix="R"):
-    global _noise_counter
-    name = f"{prefix}{_noise_counter}"
-    _noise_counter += 1
-    return name
+def _as_noisy_bool(value):
+    if isinstance(value, NoisyBool):
+        return value
+    if isinstance(value, (bool, np.bool_)):
+        return NoisyBool(sp.sympify(bool(value)), bool(value), thetas=set(), equations=[])
+    raise TypeError(f"Expected bool or NoisyBool, got {type(value).__name__}")
 
 
 def _combine_float(a, b, op):
-    b = as_noisy_float(b)
+    b = _as_noisy_float(b)
     expr = op(a.expr, b.expr)
     observed = op(a.observed, b.observed)
     thetas = a.thetas | b.thetas
@@ -36,7 +32,7 @@ def _combine_float(a, b, op):
 
 
 def _combine_bool(a, b, expr_op, observed_op):
-    b = as_noisy_bool(b)
+    b = _as_noisy_bool(b)
     expr = expr_op(a.expr, b.expr)
     observed = observed_op(a.observed, b.observed)
     thetas = a.thetas | b.thetas
@@ -45,7 +41,7 @@ def _combine_bool(a, b, expr_op, observed_op):
 
 
 def _compare_float(a, b, op):
-    b = as_noisy_float(b)
+    b = _as_noisy_float(b)
     expr = op(a.expr, b.expr)
     observed = bool(op(a.observed, b.observed))
     thetas = a.thetas | b.thetas
@@ -62,7 +58,7 @@ def _evaluate_random_expr(expr, rng, library="scipy", **sample_kwargs):
 
 
 class NoisyValue:
-    def __init__(self, expr, observed, thetas=None, equations=None):
+    def __init__(self, expr, observed, thetas, equations):
         self.expr = sp.sympify(expr)
         self.observed = observed
         self.thetas = set() if thetas is None else set(thetas)
@@ -122,47 +118,6 @@ class NoisyFloat(NoisyValue):
 
     def __float__(self):
         return self.observed
-
-    @classmethod
-    def from_noise_rv(cls, true_value, noise_rv, **sample_kwargs):
-        """
-        Build a NoisyValue from any SymPy random variable.
-
-        The returned `expr` is the latent value (`theta`), while the measurement
-        mechanism is encoded in `equations` as `theta + noise - observed = 0`.
-        This makes downstream sampling reflect analyst belief about the true
-        quantity rather than release-to-release spread.
-        """
-        noise_symbols = random_symbols(noise_rv)
-        if len(noise_symbols) != 1 or noise_rv not in noise_symbols:
-            raise TypeError("noise_rv must be a single SymPy random variable")
-
-        theta = _fresh_theta()
-        measurement_expr = theta + noise_rv
-        observed_expr = measurement_expr.subs({theta: sp.sympify(true_value)})
-        observed = float(sample(observed_expr, **sample_kwargs))
-
-        equations = [measurement_expr - observed]
-        return cls(theta, observed, thetas={theta}, equations=equations)
-
-    @classmethod
-    def from_distribution(
-        cls,
-        true_value,
-        dist_builder,
-        *dist_args,
-        name_prefix="R",
-        **dist_kwargs,
-    ):
-        """
-        Build a NoisyValue from a SymPy distribution constructor.
-
-        Example: NoisyValue.from_distribution(10, Exponential, 2)
-        """
-        name = _fresh_noise_name(name_prefix)
-        noise_rv = dist_builder(name, *dist_args, **dist_kwargs)
-        return cls.from_noise_rv(true_value, noise_rv)
-
 
     def __add__(self, other):
         return _combine_float(self, other, lambda a, b: a + b)
@@ -318,40 +273,3 @@ class NoisyBool(NoisyValue):
             samples.append(bool(value))
 
         return np.asarray(samples, dtype=bool)
-
-
-def as_noisy_float(value):
-    if isinstance(value, NoisyFloat):
-        return value
-    expr = sp.sympify(value)
-    return NoisyFloat(expr, float(expr), thetas=set(), equations=[])
-
-
-def as_noisy_bool(value):
-    if isinstance(value, NoisyBool):
-        return value
-    if isinstance(value, (bool, np.bool_)):
-        return NoisyBool(sp.sympify(bool(value)), bool(value), thetas=set(), equations=[])
-    raise TypeError(f"Expected bool or NoisyBool, got {type(value).__name__}")
-
-
-def noisy_min(*values):
-    """Return a NoisyValue representing the pointwise minimum of all inputs."""
-    if not values:
-        raise ValueError("noisy_min requires at least one value")
-
-    result = as_noisy_float(values[0])
-    for value in values[1:]:
-        result = result.minimum(value)
-    return result
-
-
-def noisy_max(*values):
-    """Return a NoisyValue representing the pointwise maximum of all inputs."""
-    if not values:
-        raise ValueError("noisy_max requires at least one value")
-
-    result = as_noisy_float(values[0])
-    for value in values[1:]:
-        result = result.maximum(value)
-    return result
