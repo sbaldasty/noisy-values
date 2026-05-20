@@ -125,12 +125,6 @@ class NoisyFloat(NoisyValue):
     def __rtruediv__(self, other):
         return _combine_float(self, other, lambda a, b: b / a)
 
-    def minimum(self, other):
-        return _combine_float(self, other, lambda a, b: Min(a, b))
-
-    def maximum(self, other):
-        return _combine_float(self, other, lambda a, b: Max(a, b))
-
     def __lt__(self, other):
         return _compare_float(self, other, lambda a, b: a < b)
 

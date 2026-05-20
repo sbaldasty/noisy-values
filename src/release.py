@@ -1,10 +1,9 @@
-from src.core import NoisyFloat
-
 from sympy import Symbol
 from sympy import sympify
 from sympy.stats import sample
 from sympy.stats.rv import random_symbols
 
+from .core import NoisyFloat
 
 _theta_counter = 0
 _noise_counter = 0
