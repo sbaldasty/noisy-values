@@ -12,37 +12,22 @@ _theta_counter = 0
 _noise_counter = 0
 
 
-def fresh_theta():
+def _fresh_theta():
     global _theta_counter
     name = f"theta_{_theta_counter}"
     _theta_counter += 1
     return Symbol(name)
 
 
-def fresh_noise_name(prefix="R"):
+def _fresh_noise_name(prefix="R"):
     global _noise_counter
     name = f"{prefix}{_noise_counter}"
     _noise_counter += 1
     return name
 
 
-def _as_noisy_float(value):
-    if isinstance(value, NoisyFloat):
-        return value
-    expr = sp.sympify(value)
-    return NoisyFloat(expr, float(expr), thetas=set(), equations=[])
-
-
-def _as_noisy_bool(value):
-    if isinstance(value, NoisyBool):
-        return value
-    if isinstance(value, (bool, np.bool_)):
-        return NoisyBool(sp.sympify(bool(value)), bool(value), thetas=set(), equations=[])
-    raise TypeError(f"Expected bool or NoisyBool, got {type(value).__name__}")
-
-
 def _combine_float(a, b, op):
-    b = _as_noisy_float(b)
+    b = as_noisy_float(b)
     expr = op(a.expr, b.expr)
     observed = op(a.observed, b.observed)
     thetas = a.thetas | b.thetas
@@ -51,7 +36,7 @@ def _combine_float(a, b, op):
 
 
 def _combine_bool(a, b, expr_op, observed_op):
-    b = _as_noisy_bool(b)
+    b = as_noisy_bool(b)
     expr = expr_op(a.expr, b.expr)
     observed = observed_op(a.observed, b.observed)
     thetas = a.thetas | b.thetas
@@ -60,12 +45,20 @@ def _combine_bool(a, b, expr_op, observed_op):
 
 
 def _compare_float(a, b, op):
-    b = _as_noisy_float(b)
+    b = as_noisy_float(b)
     expr = op(a.expr, b.expr)
     observed = bool(op(a.observed, b.observed))
     thetas = a.thetas | b.thetas
     equations = a.equations + b.equations
     return NoisyBool(expr, observed, thetas, equations)
+
+
+def _evaluate_random_expr(expr, rng, library="scipy", **sample_kwargs):
+    """Substitute one fresh numeric draw for each random symbol in expr."""
+    value = expr
+    for rv in random_symbols(value):
+        value = value.subs(rv, float(sample(rv, library=library, seed=rng, **sample_kwargs)))
+    return value
 
 
 class NoisyValue:
@@ -144,7 +137,7 @@ class NoisyFloat(NoisyValue):
         if len(noise_symbols) != 1 or noise_rv not in noise_symbols:
             raise TypeError("noise_rv must be a single SymPy random variable")
 
-        theta = fresh_theta()
+        theta = _fresh_theta()
         measurement_expr = theta + noise_rv
         observed_expr = measurement_expr.subs({theta: sp.sympify(true_value)})
         observed = float(sample(observed_expr, **sample_kwargs))
@@ -166,7 +159,7 @@ class NoisyFloat(NoisyValue):
 
         Example: NoisyValue.from_distribution(10, Exponential, 2)
         """
-        name = fresh_noise_name(name_prefix)
+        name = _fresh_noise_name(name_prefix)
         noise_rv = dist_builder(name, *dist_args, **dist_kwargs)
         return cls.from_noise_rv(true_value, noise_rv)
 
@@ -327,12 +320,19 @@ class NoisyBool(NoisyValue):
         return np.asarray(samples, dtype=bool)
 
 
-def _evaluate_random_expr(expr, rng, library="scipy", **sample_kwargs):
-    """Substitute one fresh numeric draw for each random symbol in expr."""
-    value = expr
-    for rv in random_symbols(value):
-        value = value.subs(rv, float(sample(rv, library=library, seed=rng, **sample_kwargs)))
-    return value
+def as_noisy_float(value):
+    if isinstance(value, NoisyFloat):
+        return value
+    expr = sp.sympify(value)
+    return NoisyFloat(expr, float(expr), thetas=set(), equations=[])
+
+
+def as_noisy_bool(value):
+    if isinstance(value, NoisyBool):
+        return value
+    if isinstance(value, (bool, np.bool_)):
+        return NoisyBool(sp.sympify(bool(value)), bool(value), thetas=set(), equations=[])
+    raise TypeError(f"Expected bool or NoisyBool, got {type(value).__name__}")
 
 
 def noisy_min(*values):
@@ -340,7 +340,7 @@ def noisy_min(*values):
     if not values:
         raise ValueError("noisy_min requires at least one value")
 
-    result = _as_noisy_float(values[0])
+    result = as_noisy_float(values[0])
     for value in values[1:]:
         result = result.minimum(value)
     return result
@@ -351,7 +351,7 @@ def noisy_max(*values):
     if not values:
         raise ValueError("noisy_max requires at least one value")
 
-    result = _as_noisy_float(values[0])
+    result = as_noisy_float(values[0])
     for value in values[1:]:
         result = result.maximum(value)
     return result
