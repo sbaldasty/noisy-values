@@ -64,14 +64,6 @@ class NoisyValue:
         self.thetas = set() if thetas is None else set(thetas)
         self.equations = [] if equations is None else list(equations)
 
-    @property
-    def constraints(self):
-        return self.equations
-
-    @constraints.setter
-    def constraints(self, value):
-        self.equations = list(value)
-
     def __repr__(self):
         return f"NoisyValue(expr={self.expr}, observed={self.observed})"
 
@@ -97,7 +89,7 @@ class NoisyValue:
 
 
 class NoisyFloat(NoisyValue):
-    def __init__(self, expr, observed, thetas=None, equations=None):
+    def __init__(self, expr, observed, thetas, equations):
         observed_value = float(observed)
         if equations is None:
             equations = [sp.sympify(expr) - observed_value]
@@ -198,7 +190,7 @@ class NoisyFloat(NoisyValue):
 
 
 class NoisyBool(NoisyValue):
-    def __init__(self, expr, observed, thetas=None, equations=None):
+    def __init__(self, expr, observed, thetas, equations):
         super().__init__(expr, bool(observed), thetas=thetas, equations=equations)
 
     def __repr__(self):
