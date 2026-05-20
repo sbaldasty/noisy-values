@@ -78,3 +78,8 @@ one random variable.
 
 This is algebraic elimination + forward Monte Carlo, not exact Bayesian
 conditioning.
+
+Also the current implementation assumes the random variables that represent
+noise are all independent of each other. Not a problem for differential
+privacy, but it could be a problem to generalize beyond differential privacy.
+There would have to be support for "noise cloning".
