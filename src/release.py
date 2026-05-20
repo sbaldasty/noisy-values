@@ -1,3 +1,5 @@
+from src.core import NoisyFloat
+
 from sympy import Symbol
 from sympy import sympify
 from sympy.stats import sample
@@ -22,7 +24,7 @@ def _fresh_noise_name(prefix="R"):
     return name
 
 
-def from_noise_rv(cls, true_value, noise_rv, **sample_kwargs):
+def from_noise_rv(true_value, noise_rv, **sample_kwargs):
     """
     Build a NoisyValue from any SymPy random variable.
 
@@ -41,11 +43,10 @@ def from_noise_rv(cls, true_value, noise_rv, **sample_kwargs):
     observed = float(sample(observed_expr, **sample_kwargs))
 
     equations = [measurement_expr - observed]
-    return cls(theta, observed, thetas={theta}, equations=equations)
+    return NoisyFloat(theta, observed, thetas={theta}, equations=equations)
 
 
 def from_distribution(
-    cls,
     true_value,
     dist_builder,
     *dist_args,
@@ -59,4 +60,4 @@ def from_distribution(
     """
     name = _fresh_noise_name(name_prefix)
     noise_rv = dist_builder(name, *dist_args, **dist_kwargs)
-    return cls.from_noise_rv(true_value, noise_rv)
+    return from_noise_rv(true_value, noise_rv)

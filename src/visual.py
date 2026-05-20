@@ -150,7 +150,7 @@ def _estimate_weighted_density(values, weights, grid_size=500, bandwidth=None, t
     return grid, density
 
 
-def plot_posteriors(
+def plot_posterior(
     *noisy_values,
     grid_size=500,
     quadrature_points=17,

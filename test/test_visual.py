@@ -6,7 +6,7 @@ import sympy as sp
 from sympy.stats import Normal
 
 from core import NoisyFloat
-from visual import plot_posteriors
+from visual import plot_posterior
 
 
 matplotlib.use("Agg")
@@ -30,7 +30,7 @@ def test_plot_posteriors_for_composed_expression_returns_density_curve():
         equations=[theta_0 + eps_0 - observed_0, theta_1 + eps_1 - observed_1],
     )
 
-    result = plot_posteriors(noisy, quadrature_points=7, grid_size=220)
+    result = plot_posterior(noisy, quadrature_points=7, grid_size=220)
 
     assert "ax" in result
     assert "curves" in result
@@ -69,6 +69,6 @@ def test_plot_posteriors_supports_multiple_values():
         equations=[theta + eps_obs - 1.0],
     )
 
-    result = plot_posteriors(noisy_a, noisy_b, quadrature_points=7, grid_size=180)
+    result = plot_posterior(noisy_a, noisy_b, quadrature_points=7, grid_size=180)
 
     assert len(result["curves"]) == 2

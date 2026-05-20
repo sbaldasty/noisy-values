@@ -1,4 +1,4 @@
-from core import _as_noisy_float
+from .core import _as_noisy_float
 
 
 def noisy_min(*values):
