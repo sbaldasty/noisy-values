@@ -1,14 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
 [project]
 name = "noisy-values"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "ipykernel>=7.2.0",
-    "jupyter>=1.1.1",
-    "matplotlib>=3.10.8",
-    "numpy>=2.4.4",
-    "scipy>=1.17.1",
-    "sympy>=1.14.0",
+license = { file = "LICENSE" }
+authors = [
+  { name = "Steven Baldasty" },
 ]
+dependencies = [
+  "ipykernel>=7.2.0",
+  "jupyter>=1.1.1",
+  "numpy>=2.4.4",
+  "scipy>=1.17.1",
+  "sympy>=1.14.0",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.optional-dependencies]
+dev = [
+  "matplotlib>=3.10.8",
+  "pytest>=8.0",
+  "ipykernel>=7.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
